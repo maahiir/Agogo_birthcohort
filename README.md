@@ -1,1 +1,2 @@
-The data in this project comes from the Agogo brth cohort that was orignially recruited in the year 2000. In 2015 when these children were teenagers a cross sectional data dietary patterns using a semi quantitative food frequency questionnaire was collected fron 
+The data in this project comes from the Agogo brth cohort that was orignially recruited in the year 2000. In 2015 when these children were teenagers a cross sectional data dietary patterns using a semi quantitative food frequency questionnaire was collected.
+In this analyiss we do a causal mediation anaylsis in which we try to establish if the dietary patterns lie on the causal path way between exposure to in utero malaria and cardio metabollic risk factors. 
