@@ -1,0 +1,381 @@
+---
+title: "Agogo_birthcohort"
+output: html_document
+date: "2024-05-24"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(bigmemory)
+library(ff)
+library(plyr)
+library(ggplot2)
+library(grid)
+library(dplyr)
+library(tidyr)
+library(tidyverse)
+library(lubridate)
+library(dygraphs)
+library(psych) # load libraries
+library(nFactors)
+library(reshape2)
+library(ggplot2)
+library(dplyr)
+library(GPArotation)
+library(corrplot)
+library(Hmisc)
+library(factoextra)
+library(usethis)
+library(freqtables)
+library(here)
+library(janitor)
+library(labelled)
+library(gtsummary)
+library(jtools)
+library(huxtable)
+library(flextable)
+library(broom)
+library(officer)
+Sys.setenv("LANGUAGE"= "EN")
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r}
+#import all the data frames needed to for the analysis 
+Agogo_MahirPCA<- read.csv(file="agogo_2015_Sophie_PCA.csv",header=TRUE,sep = ";",na.strings=c("NA","NaN", " "), dec = ",")
+nodiet<-read.csv(file="agogo_2000_2015_cohort_NoDietPA.csv",header = T,sep=";",na.strings = c("NA","NaN",""),dec = ",")
+
+mothers_age<-nodiet[,c(1:2,7)]
+mothers_age<-mothers_age%>%arrange(id)
+
+Agogo_MahirPCA<-Agogo_MahirPCA[(-201:-205),] ##remove rows that do not have any observations
+Agogo_MahirPCA<- Agogo_MahirPCA%>%arrange(id) #arrange the observations in increasing order of ID 
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r}
+##create a subset data for factor analysis
+
+pca<-Agogo_MahirPCA[,c(1,253:315)]
+
+KMO(pca[,c(-1)])  ###kaiser - Meyer - olkin test for sampling adequacy
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+```{r}
+####factor analysis####
+
+factor_four <- fa(pca [,c(-1)] , nfactors = 4, rotate = "varimax", fm= "ml")
+factor_four
+factor_four_matrix <- as.matrix(factor_four$loadings) # create a matrix of factor loading 
+
+std_pca<-scale(pca[,c(-1)]) #standardize the food intake in kilo calories per day n(0,1)
+
+pattern_scores<-std_pca%*%factor_four_matrix #matrix multiplication to calculate dietary pattern score for each individual
+
+pattern_scores <- data.frame(ID = pca[, c(1)], pattern_scores) #bind the id column to the pattern scores 
+
+#manual calculation to check if the matrix multiplication for pattern score calculation worked or not
+ff1<-std_pca*f1$f1[match(names(std_pca), f1$newColName)][col(std_pca)]
+ff1$pat_sc<-rowSums(ff1,na.rm=T)
+
+```
+
+```{r}
+#prepare the date frame for regression and dividing dietary pattern in to terciles
+
+Agogo_final<-Agogo_MahirPCA[,c(1:74)] #create a subset of variables from original variables to be used in further analysis
+
+Agogo_final<-left_join(Agogo_final,pattern_scores,by=c("id"="ID")) #join the pattern scores with the subset data frame for analysis
+Agogo_final<-left_join(Agogo_final,mothers_age,by=c("id"="id"))
+
+
+Agogo_final<-Agogo_final%>%mutate(edu_mo=na_if(edu_mo,"#NULL!")) ###replace all the nulll values with NA 
+Agogo_final<-Agogo_final%>%mutate(mps_pos=na_if(mps_pos,"#NULL!"))
+Agogo_final$edu_mo<-as.factor(Agogo_final$edu_mo)
+Agogo_final$mps_pos<-as.factor(Agogo_final$mps_pos)
+Agogo_final$edu_m<-as.factor(Agogo_final$edu_m)
+Agogo_final$occu_m<-as.factor(Agogo_final$occu_m)
+```
+
+
+####Regression analyis in 3 parts
+
+```{r}
+### 1 Association between in utero malaria and dietary pattern scores###
+
+#crude model
+regression1<-subset(Agogo_final,is.na(mps_pos)==F) ###create a regression data subset 
+#create a function
+run_lm <- function(ot_v,pr_v, regression1) {
+  formula <- as.formula(paste(ot_v, "~", pr_v))
+  model<-lm(formula,data = regression1)
+  return(model)
+}
+model_counter<-1
+#select outcome variables
+ot_vr<-c("ML1","ML4","ML2","ML3")
+pred_vr<-c("mps_pos")
+#empty list to store models
+models<-list()
+#for loop to run all crude regressions
+for (ot_v in ot_vr) {
+  
+  model <- run_lm(ot_v, pred_vr,regression1)
+  model_name <- paste("Crude_model", model_counter, sep = "")
+  models[[model_name]] <- model
+  model_counter<-model_counter+1
+}
+
+
+#prot_vr#print the results
+for(model_name in names(models)){
+  
+ cat("Model:",model_name,"\n")
+  print(summ(models[[model_name]], confint = T, ci.width = 0.5))
+  cat("\n")
+}
+
+
+
+###Adjusted model
+
+#create a function
+run_lm <- function(ot_v_ad, regression1) {
+  model <- lm(as.formula(paste(ot_v_ad, "~ mps_pos+sex_2015+edu_m+hh_size+parity+occu_m")), data = regression1)
+  return(model)
+}
+
+#select outcome variables
+ot_vr_ad<-c("ML1","ML4","ML2","ML3")
+model_counter<-1
+#empty list to store models
+models<-list()
+#for loop to run all crude regressions
+for (ot_v_ad in ot_vr_ad) {
+  
+  model <- run_lm(ot_v_ad, regression1)
+  model_name <- paste("Adjusted_model", model_counter, sep = "")
+  models[[model_name]] <- model
+  model_counter<-model_counter+1
+}
+
+#print the results
+for(model_name in names(models)){
+ 
+ cat("Model:",model_name,"\n")
+  print(summ(models[[model_name]]))
+  cat("\n")
+}
+
+
+export_summs(models[[1]],models[[2]],models[[3]],models[[4]], error_format = "95% CI [{conf.low}, {conf.high}]",to.file = "docx", file.name = "hux.docx" )
+
+
+    ```
+
+
+
+
+```{r}
+### 2. Association between dieatry patterns and cardio metabollic risk factors 
+
+#Crude model
+run_lm <- function(ot_v2, pr_v2, Agogo_final) {
+  formula <- as.formula(paste(ot_v2, "~",pr_v2))
+  model<-lm(formula,data = Agogo_final)
+  return(model)
+}
+model_counter <- 1
+#select outcome variables
+ot_vr<-c("BMI","FPG","sysBP_mean","diaBP_mean")
+pr_vr<-c("ML1","ML4","ML2","ML3")
+
+#empty list to store models
+models<-list()
+#for loop to run all crude regressions
+for(ot_v2 in ot_vr){
+   
+     for(pr_v2 in pr_vr){
+          model_name <- paste("Crude_model", model_counter, sep = "")
+          model<-run_lm(ot_v2,pr_v2,Agogo_final)
+          models[[model_name]]<-model
+          model_counter<-model_counter+1
+   }
+}
+
+#print the results
+for(model_name in names(models)){
+  
+  cat("Model:",model_name,"\n")
+  print(summ(models[[model_name]]))
+  cat("\n")
+}
+
+export_summs(models[[1]],models[[2]],models[[3]],models[[4]],error_format = "95% CI [{conf.low}, {conf.high}]",to.file = "docx", file.name = "hux1.docx" )
+
+export_summs(models[[5]],models[[6]],models[[7]],models[[8]],error_format = "95% CI [{conf.low}, {conf.high}]",to.file = "docx", file.name = "hux2.docx")
+
+export_summs(models[[9]],models[[10]],models[[11]],models[[12]],error_format = "95% CI [{conf.low}, {conf.high}]",to.file = "docx", file.name = "hux3.docx")
+
+export_summs(models[[13]],models[[14]],models[[15]],models[[16]],error_format = "95% CI [{conf.low}, {conf.high}]",to.file = "docx", file.name = "hux4.docx")
+
+
+###Adjusted model
+
+run_lm <- function(ot_v2, pr_v2, Agogo_final,ad_vr) {
+  formula <- as.formula(paste(ot_v2, "~",pr_v2, "+",paste(ad_vr,collapse = "+")))
+  model<-lm(formula,data = Agogo_final)
+  return(model)
+}
+model_counter <- 1
+#select outcome variables
+ot_vad<-c("BMI","FPG","sysBP_mean","diaBP_mean")
+pr_vad<-c("ML1","ML4","ML2","ML3")
+ad_vr<-c("edu_m","occu_m","hh_size")
+
+#empty list to store models
+models<-list()
+#for loop to run all crude regressions
+for(ot_v2 in ot_vad){
+   
+     for(pr_v2 in pr_vad){
+          model_name <- paste("Adjusted_model", model_counter, sep = "")
+          model<-run_lm(ot_v2,pr_v2,Agogo_final,ad_vr)
+          models[[model_name]]<-model
+          model_counter<-model_counter+1
+   }
+}
+
+#print the results
+for(model_name in names(models)){
+  
+  cat("Model:",model_name,"\n")
+  print(summ(models[[model_name]]))
+  cat("\n")
+}
+summary(lm(FPG~ML1+edu_m+occu_m+parity+hh_size,data = Agogo_final))
+
+export_summs(models[[1]],models[[2]],models[[3]],models[[4]],error_format = "95% CI [{conf.low}, {conf.high}]",to.file = "docx", file.name = "hux1.docx")
+
+export_summs(models[[5]],models[[6]],models[[7]],models[[8]],error_format = "95% CI [{conf.low}, {conf.high}]",to.file = "docx", file.name = "hux2.docx")
+
+export_summs(models[[9]],models[[10]],models[[11]],models[[12]], error_format ="95% CI [{conf.low}, {conf.high}]",to.file = "docx", file.name = "hux3.docx")
+
+export_summs(models[[13]],models[[14]],models[[15]],models[[16]],error_format ="95% CI [{conf.low}, {conf.high}]",to.file = "docx", file.name = "hux4.docx")
+
+
+```
+
+```{r}
+### 3. Mediation analysis with roots and tuber based dietary pattern as mediator
+
+#crude model
+mediation<-subset(Agogo_final,is.na(mps_pos)==F)
+
+run_lm <- function(med_ot, mediation) {
+  model <- lm(as.formula(paste(med_ot, "~ mps_pos")), data = mediation)
+  return(model)
+}
+
+model_counter<-1
+#select outcome variables
+mediation_cr<-c("BMI","FPG","sysBP_mean","diaBP_mean")
+
+#empty list to store models
+models<-list()
+#for loop to run all crude regressions
+for (med_ot in mediation_cr) {
+  
+  model <- run_lm(med_ot, mediation)
+  model_name <- paste("crude_model", model_counter, sep = "")
+  models[[model_name]] <- model
+  model_counter<-model_counter+1
+}
+
+#print the results
+for(model_name in names(models)){
+  
+   cat("Model:",model_name,"\n")
+  print(summ(models[[model_name]]))
+  cat("\n")
+}
+
+export_summs(models[[1]],models[[2]],models[[3]],models[[4]],error_format ="95% CI [{conf.low}, {conf.high}]",to.file = "docx", file.name = "hux.docx")
+
+
+###Adjusted model
+
+run_lm <- function(med_ot, mediation) {
+  model <- lm(as.formula(paste(med_ot, "~ mps_pos+sex_2015+edu_m+mother_age")), data = mediation)
+  return(model)
+}
+
+model_counter<-1
+#select outcome variables
+mediation_cr<-c("BMI","FPG","sysBP_mean","diaBP_mean")
+
+#empty list to store models
+models<-list()
+#for loop to run all crude regressions
+for (med_ot in mediation_cr) {
+  
+  model <- run_lm(med_ot, mediation)
+  model_name <- paste("Adjusted_model", model_counter, sep = "")
+  models[[model_name]] <- model
+  model_counter<-model_counter+1
+}
+
+#print the results
+for(model_name in names(models)){
+  
+   cat("Model:",model_name,"\n")
+  print(summ(models[[model_name]]))
+  cat("\n")
+}
+
+export_summs(models[[1]],models[[2]],models[[3]],models[[4]],error_format ="95% CI [{conf.low}, {conf.high}]",to.file = "docx", file.name = "hux2.docx")
+
+
+###Adjusted model + mediator
+
+run_lm <- function(med_ot, mediation) {
+  model <- lm(as.formula(paste(med_ot, "~ mps_pos+sex_2015+edu_m+mother_age+ML2")), data = mediation)
+  return(model)
+}
+
+model_counter<-1
+#select outcome variables
+mediation_cr<-c("BMI","FPG","sysBP_mean","diaBP_mean")
+
+#empty list to store models
+models<-list()
+#for loop to run all crude regressions
+for (med_ot in mediation_cr) {
+  
+  model <- run_lm(med_ot, mediation)
+  model_name <- paste("Adjusted_model", model_counter, sep = "")
+  models[[model_name]] <- model
+  model_counter<-model_counter+1
+}
+
+#print the results
+for(model_name in names(models)){
+  
+   cat("Model:",model_name,"\n")
+  print(summ(models[[model_name]]))
+  cat("\n")
+}
+
+export_summs(models[[1]],models[[2]],models[[3]],models[[4]],error_format ="95% CI [{conf.low}, {conf.high}]",to.file = "docx", file.name = "hux3.docx" )
+
+```
+
