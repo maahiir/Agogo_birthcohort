@@ -36,6 +36,9 @@ library(huxtable)
 library(flextable)
 library(broom)
 library(officer)
+library(MVN)
+library(QuantPsyc)
+library(energy)
 Sys.setenv("LANGUAGE"= "EN")
 ```
 
@@ -50,11 +53,13 @@ When you click the **Knit** button a document will be generated that includes bo
 Agogo_MahirPCA<- read.csv(file="agogo_2015_Sophie_PCA.csv",header=TRUE,sep = ";",na.strings=c("NA","NaN", " "), dec = ",")
 nodiet<-read.csv(file="agogo_2000_2015_cohort_NoDietPA.csv",header = T,sep=";",na.strings = c("NA","NaN",""),dec = ",")
 
-mothers_age<-nodiet[,c(1:2,7)]
+mothers_age<-nodiet[,c(1:2,7,30)]
 mothers_age<-mothers_age%>%arrange(id)
 
 Agogo_MahirPCA<-Agogo_MahirPCA[(-201:-205),] ##remove rows that do not have any observations
 Agogo_MahirPCA<- Agogo_MahirPCA%>%arrange(id) #arrange the observations in increasing order of ID 
+
+??lme()
 ```
 
 ## Including Plots
@@ -67,10 +72,50 @@ You can also embed plots, for example:
 pca<-Agogo_MahirPCA[,c(1,253:315)]
 
 KMO(pca[,c(-1)])  ###kaiser - Meyer - olkin test for sampling adequacy
+
+#bartlett test of sphericity to check for level of correlation among food items
+
+cor_mat<-cor(pca[,c(-1)])
+cortest.bartlett(cor_mat,n=nrow(pca))
+
+result <- mvn(pca[,c(-1)], mvnTest = "mardia")
+summary(result)
+mult.norm(pca[,c(-1)])$mult.test
+
 ```
 
 Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
 ```{r}
+#####Principal component analysis###
+
+pc <- prcomp(pca[,c(-1)], scale. = TRUE)
+
+# Get the eigenvalues (variances of the principal components)
+eigenvalues <- pc$sdev^2
+var <- pc$sdev^2 / sum (pc$sdev^2)
+n_components <- 20
+# Create a data frame for the scree plot
+scree_data <- data.frame(
+  Principal_Component = 1:n_components,
+  Variance = var [1:n_components]
+)
+
+# Specify the cut-off value
+cutoff_value <- 2.23
+
+# Draw the scree plot with ggplot2
+ggplot(scree_data, aes(x = Principal_Component, y = Variance)) +
+  geom_point(size = 2) +
+  geom_line(group = 1) +
+  geom_hline(yintercept = cutoff_value, linetype = "dashed", color = "red") +
+  labs(title = "Scree Plot",
+       x = "Principal Component",
+       y = "Variance (Eigenvalue)") +
+  scale_x_discrete(breaks = seq(1, n_components, by = 1)) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
 ####factor analysis####
 
 factor_four <- fa(pca [,c(-1)] , nfactors = 4, rotate = "varimax", fm= "ml")
@@ -98,12 +143,17 @@ Agogo_final<-left_join(Agogo_final,pattern_scores,by=c("id"="ID")) #join the pat
 Agogo_final<-left_join(Agogo_final,mothers_age,by=c("id"="id"))
 
 
-Agogo_final<-Agogo_final%>%mutate(edu_mo=na_if(edu_mo,"#NULL!")) ###replace all the nulll values with NA 
-Agogo_final<-Agogo_final%>%mutate(mps_pos=na_if(mps_pos,"#NULL!"))
-Agogo_final$edu_mo<-as.factor(Agogo_final$edu_mo)
-Agogo_final$mps_pos<-as.factor(Agogo_final$mps_pos)
 Agogo_final$edu_m<-as.factor(Agogo_final$edu_m)
 Agogo_final$occu_m<-as.factor(Agogo_final$occu_m)
+Agogo_final$pcr_fal_mo<-as.factor(Agogo_final$pcr_fal_mo)
+table(Agogo_final$occu_m,useNA = "always")
+
+Agogo_final$edu_m <- factor(Agogo_final$edu_m, levels = c(1,2,3,4,5), 
+                                                labels = c("No Education", "Primary Education", "Secondary Education","Tertiary                                                                            Education","Other"))
+Agogo_final$occu_m <- factor(Agogo_final$occu_m, levels = c(1,2,3,5,6,7,8,9), 
+                                                labels = c("Subsistence Farmer", "Commercial Farmer", "Casual                                                                                              Labourer","Trader","Businesswoman","Public Servant","Unemployed","Other"))
+describe(Agogo_final$parity)
+
 ```
 
 
@@ -113,7 +163,7 @@ Agogo_final$occu_m<-as.factor(Agogo_final$occu_m)
 ### 1 Association between in utero malaria and dietary pattern scores###
 
 #crude model
-regression1<-subset(Agogo_final,is.na(mps_pos)==F) ###create a regression data subset 
+regression1<-subset(Agogo_final,is.na(pcr_fal_mo)==F) ###create a regression data subset 
 #create a function
 run_lm <- function(ot_v,pr_v, regression1) {
   formula <- as.formula(paste(ot_v, "~", pr_v))
@@ -123,7 +173,7 @@ run_lm <- function(ot_v,pr_v, regression1) {
 model_counter<-1
 #select outcome variables
 ot_vr<-c("ML1","ML4","ML2","ML3")
-pred_vr<-c("mps_pos")
+pred_vr<-c("pcr_fal_mo")
 #empty list to store models
 models<-list()
 #for loop to run all crude regressions
@@ -150,7 +200,7 @@ for(model_name in names(models)){
 
 #create a function
 run_lm <- function(ot_v_ad, regression1) {
-  model <- lm(as.formula(paste(ot_v_ad, "~ mps_pos+sex_2015+edu_m+hh_size+parity+occu_m")), data = regression1)
+  model <- lm(as.formula(paste(ot_v_ad, "~ pcr_fal_mo+sex_2015+edu_m+hh_size+parity+occu_m+mother_age")), data = regression1)
   return(model)
 }
 
@@ -189,9 +239,9 @@ export_summs(models[[1]],models[[2]],models[[3]],models[[4]], error_format = "95
 ### 2. Association between dieatry patterns and cardio metabollic risk factors 
 
 #Crude model
-run_lm <- function(ot_v2, pr_v2, Agogo_final) {
+run_lm <- function(ot_v2, pr_v2, regression1) {
   formula <- as.formula(paste(ot_v2, "~",pr_v2))
-  model<-lm(formula,data = Agogo_final)
+  model<-lm(formula,data = regression1)
   return(model)
 }
 model_counter <- 1
@@ -206,7 +256,7 @@ for(ot_v2 in ot_vr){
    
      for(pr_v2 in pr_vr){
           model_name <- paste("Crude_model", model_counter, sep = "")
-          model<-run_lm(ot_v2,pr_v2,Agogo_final)
+          model<-run_lm(ot_v2,pr_v2,regression1)
           models[[model_name]]<-model
           model_counter<-model_counter+1
    }
@@ -231,16 +281,16 @@ export_summs(models[[13]],models[[14]],models[[15]],models[[16]],error_format = 
 
 ###Adjusted model
 
-run_lm <- function(ot_v2, pr_v2, Agogo_final,ad_vr) {
+run_lm <- function(ot_v2, pr_v2, regression1,ad_vr) {
   formula <- as.formula(paste(ot_v2, "~",pr_v2, "+",paste(ad_vr,collapse = "+")))
-  model<-lm(formula,data = Agogo_final)
+  model<-lm(formula,data = regression1)
   return(model)
 }
 model_counter <- 1
 #select outcome variables
 ot_vad<-c("BMI","FPG","sysBP_mean","diaBP_mean")
 pr_vad<-c("ML1","ML4","ML2","ML3")
-ad_vr<-c("edu_m","occu_m","hh_size")
+ad_vr<-c("edu_m","occu_m","hh_size","parity","mother_age")
 
 #empty list to store models
 models<-list()
@@ -249,7 +299,7 @@ for(ot_v2 in ot_vad){
    
      for(pr_v2 in pr_vad){
           model_name <- paste("Adjusted_model", model_counter, sep = "")
-          model<-run_lm(ot_v2,pr_v2,Agogo_final,ad_vr)
+          model<-run_lm(ot_v2,pr_v2,regression1,ad_vr)
           models[[model_name]]<-model
           model_counter<-model_counter+1
    }
@@ -262,7 +312,6 @@ for(model_name in names(models)){
   print(summ(models[[model_name]]))
   cat("\n")
 }
-summary(lm(FPG~ML1+edu_m+occu_m+parity+hh_size,data = Agogo_final))
 
 export_summs(models[[1]],models[[2]],models[[3]],models[[4]],error_format = "95% CI [{conf.low}, {conf.high}]",to.file = "docx", file.name = "hux1.docx")
 
@@ -271,18 +320,17 @@ export_summs(models[[5]],models[[6]],models[[7]],models[[8]],error_format = "95%
 export_summs(models[[9]],models[[10]],models[[11]],models[[12]], error_format ="95% CI [{conf.low}, {conf.high}]",to.file = "docx", file.name = "hux3.docx")
 
 export_summs(models[[13]],models[[14]],models[[15]],models[[16]],error_format ="95% CI [{conf.low}, {conf.high}]",to.file = "docx", file.name = "hux4.docx")
-
-
+rm(m)
 ```
 
 ```{r}
 ### 3. Mediation analysis with roots and tuber based dietary pattern as mediator
 
 #crude model
-mediation<-subset(Agogo_final,is.na(mps_pos)==F)
+mediation<-subset(Agogo_final,is.na(pcr_fal_mo)==F)
 
 run_lm <- function(med_ot, mediation) {
-  model <- lm(as.formula(paste(med_ot, "~ mps_pos")), data = mediation)
+  model <- lm(as.formula(paste(med_ot, "~ pcr_fal_mo")), data = mediation)
   return(model)
 }
 
@@ -315,7 +363,7 @@ export_summs(models[[1]],models[[2]],models[[3]],models[[4]],error_format ="95% 
 ###Adjusted model
 
 run_lm <- function(med_ot, mediation) {
-  model <- lm(as.formula(paste(med_ot, "~ mps_pos+sex_2015+edu_m+mother_age")), data = mediation)
+  model <- lm(as.formula(paste(med_ot, "~ pcr_fal_mo+edu_m+occu_m+mother_age+hh_size+parity")), data = mediation)
   return(model)
 }
 
@@ -348,7 +396,7 @@ export_summs(models[[1]],models[[2]],models[[3]],models[[4]],error_format ="95% 
 ###Adjusted model + mediator
 
 run_lm <- function(med_ot, mediation) {
-  model <- lm(as.formula(paste(med_ot, "~ mps_pos+sex_2015+edu_m+mother_age+ML2")), data = mediation)
+  model <- lm(as.formula(paste(med_ot, "~ pcr_fal_mo+edu_m+occu_m+mother_age+hh_size+parity+ML2")), data = mediation)
   return(model)
 }
 
@@ -377,5 +425,95 @@ for(model_name in names(models)){
 
 export_summs(models[[1]],models[[2]],models[[3]],models[[4]],error_format ="95% CI [{conf.low}, {conf.high}]",to.file = "docx", file.name = "hux3.docx" )
 
+```
+
+```{r}
+
+#create terciles of each dietary pattern
+
+#Manufactured food based diet
+
+
+Manufactured_based<-mediation[,c(41,43,45,75,79,80,81)]
+Manufactured_based<- Manufactured_based %>%
+  mutate(trt = ntile(ML1, 3)) %>%
+  mutate(trt = if_else(trt == 1, '1', if_else(trt == 2, '2', '3')))
+Manufactured_based$trt <- factor(Manufactured_based$trt, levels = c(1, 2, 3), 
+                                                labels = c("Tercile 1", "Tercile 2", "Tercile 3"))
+#tbl_summary function generates publication ready tables in any format requires.
+t1<-Manufactured_based%>%select(edu_m,occu_m,hh_size,mother_age,parity,trt)%>% 
+                      tbl_summary(by = trt,statistic = list(all_continuous() ~"{mean} ({sd})",all_categorical() ~ "{n} ({p}%)"),                                      digits = all_continuous() ~ 2, label = c(hh_size~"Household Size", edu_m~"Mother's Education",mother_age~"Mother's                               age",occu_m~"Mothers Occupation",parity~"Parity"))
+
+mean_sd <- function(x) c(mean = mean(x), sd = sd(x)) #specifically for parity variable since tbl_summary treats parity as categorical variable
+result_tapply <- sapply(split(Manufactured_based$parity, Manufactured_based$trt), mean_sd)
+
+# Transpose and convert to dataframe
+result_tapply <- as.data.frame(t(result_tapply))
+names(result_tapply) <- c("mean_value", "sd_value")
+
+
+
+#Vegetables and fruits based diet
+Vegetable_based<-mediation[,c(41,43,45,76,79,80,81)]
+Vegetable_based<- Vegetable_based %>%
+  mutate(trt = ntile(ML4, 3)) %>%
+  mutate(trt = if_else(trt == 1, '1', if_else(trt == 2, '2', '3')))
+Vegetable_based$trt <- factor(Vegetable_based$trt, levels = c(1, 2, 3), 
+                                                labels = c("Tercile 1", "Tercile 2", "Tercile 3"))
+Vegetable_based$parity<-as.integer(Vegetable_based$parity)
+
+t2<-Vegetable_based%>%select(edu_m,occu_m,hh_size,mother_age,parity,trt)%>% 
+                      tbl_summary(by = trt,statistic = list(all_continuous() ~"{mean} ({sd})",all_categorical() ~ "{n} ({p}%)"),                                      digits = all_continuous() ~ 2, label = c(hh_size~"Household Size", edu_m~"Mother's Education",mother_age~"Mother's                               age",occu_m~"Mothers Occupation",parity~"Parity"))
+result_tapply <- sapply(split(Vegetable_based$parity, Vegetable_based$trt), mean_sd)
+
+# Transpose and convert to dataframe
+result_tapply <- as.data.frame(t(result_tapply))
+names(result_tapply) <- c("mean_value", "sd_value")
+
+#Roots and tuber based diet
+Roots_based<-mediation[,c(41,43,45,77,79,80,81)]
+Roots_based<- Roots_based %>%
+  mutate(trt = ntile(ML2, 3)) %>%
+  mutate(trt = if_else(trt == 1, '1', if_else(trt == 2, '2', '3')))
+Roots_based$trt <- factor(Roots_based$trt, levels = c(1, 2, 3), 
+                                                labels = c("Tercile 1", "Tercile 2", "Tercile 3"))
+t3<-Roots_based%>%select(edu_m,occu_m,hh_size,mother_age,parity,trt)%>% 
+                      tbl_summary(by = trt,statistic = list(all_continuous() ~"{mean} ({sd})",all_categorical() ~ "{n} ({p}%)"),                                      digits = all_continuous() ~ 2, label = c(hh_size~"Household Size", edu_m~"Mother's Education",mother_age~"Mother's                               age",occu_m~"Mothers Occupation",parity~"Parity"))
+result_tapply <- sapply(split(Roots_based$parity, Roots_based$trt), mean_sd)
+
+# Transpose and convert to dataframe
+result_tapply <- as.data.frame(t(result_tapply))
+names(result_tapply) <- c("mean_value", "sd_value")
+
+#Soup and fufu based diet 
+Soup_based<-mediation[,c(41,43,45,78,79,80,81)]
+Soup_based<- Soup_based %>%
+  mutate(trt = ntile(ML3, 3)) %>%
+  mutate(trt = if_else(trt == 1, '1', if_else(trt == 2, '2', '3')))
+Soup_based$trt <- factor(Soup_based$trt, levels = c(1, 2, 3), 
+                                                labels = c("Tercile 1", "Tercile 2", "Tercile 3"))
+t4<-Soup_based%>%select(edu_m,occu_m,hh_size,mother_age,parity,trt)%>% 
+                      tbl_summary(by = trt,statistic = list(all_continuous() ~"{mean} ({sd})",all_categorical() ~ "{n} ({p}%)"),                                      digits = all_continuous() ~ 2, label = c(hh_size~"Household Size", edu_m~"Mother's Education",mother_age~"Mother's                               age",occu_m~"Mothers Occupation",parity~"Parity"))
+result_tapply <- sapply(split(Manufactured_based$parity, Manufactured_based$trt), mean_sd)
+
+# Transpose and convert to dataframe
+result_tapply <- as.data.frame(t(result_tapply))
+names(result_tapply) <- c("mean_value", "sd_value")
+
+##Merge the tables of terciles together 
+tb_mer<-tbl_merge(tbls = list(t1,t2,t3,t4),tab_spanner = c("Manufactured Based","Vegetable based","Roots & tuber based", "Soup & fufu based"))%>%as_gt()%>%gt::gtsave(filename = "tbl.docx")
+```
+```{r}
+mediation%>%select(edu_m, occu_m, BMI,FPG,diaBP_mean,sysBP_mean,mother_age,hh_size)%>%
+                    tbl_summary(digits = all_continuous() ~ 2, 
+                    label = c(edu_m~"Mother's Education",occu_m~"Mother's Occupation",BMI~"Body Mass Index",FPG~"Fasting Plasma Glucose",
+                               diaBP_mean~"Diastolic blood Pressur",sysBP_mean~"Systolic blood pressure",mother_age~"Mother's age",
+                               hh_size~"Household size"))
+
+Agogo_final%>%select(edu_m, occu_m, BMI,FPG,diaBP_mean,sysBP_mean,mother_age,hh_size)%>%
+                    tbl_summary(digits = all_continuous() ~ 2, 
+                    label = c(edu_m~"Mother's Education",occu_m~"Mother's Occupation",BMI~"Body Mass Index",FPG~"Fasting Plasma Glucose",
+                               diaBP_mean~"Diastolic blood Pressur",sysBP_mean~"Systolic blood pressure",mother_age~"Mother's age",
+                               hh_size~"Household size"))
 ```
 

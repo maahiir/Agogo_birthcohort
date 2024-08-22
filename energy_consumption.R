@@ -18,13 +18,29 @@ library(corrplot)
 library(Hmisc)
 library(factoextra)
 library(usethis)
+library(freqtables)
+library(here)
+library(janitor)
+library(labelled)
+library(gtsummary)
+library(jtools)
 #install.packages("Hmisc")
-use_git()
+#install.packages("jtools")
+
+
 Sys.setenv("LANGUAGE"= "EN")
 rm(doPlots)
+rm(Agogo_MahirPCA)
 
-Agogo_MahirPCA<- read.csv(file="agogo_2015_Sophie_PCA.csv",header=TRUE,sep = ";",na.strings=c("NA","NaN", " "))
+Agogo_MahirPCA<- read.csv(file="agogo_2015_Sophie_PCA.csv",header=TRUE,sep = ";",na.strings=c("NA","NaN", " "), dec = ",")
+nodiet<-read.csv(file="agogo_2000_2015_cohort_NoDietPA.csv",header = T,sep=";",na.strings = c("NA","NaN",""),dec = ",")
+
+mothers_age<-nodiet[,c(1:2,7,30)]
+mothers_age<-mothers_age%>%arrange(id)
+
+Agogo_MahirPCA<-Agogo_MahirPCA[(-201:-205),]
 Agogo_MahirPCA<- Agogo_MahirPCA%>%arrange(id)
+
 head(Agogo_MahirPCA)
 
 head(Agogo_MahirPCA$plantain_3_fingers)
@@ -472,67 +488,220 @@ Agogo_MahirPCA<-Agogo_MahirPCA %>%
                                    ice_cream == 5 ~ 1*54))
 head(Agogo_MahirPCA$ice_cream_day)
 
-rm(Agogo_MahirPCA)
-
-
-
-Agogo_MahirPCA$id<-as.character(Agogo_MahirPCA$id)
-ord_food<-Agogo_MahirPCA[,c(187:252)]  
-ord_food<-ord_food[,c(-57,-58,-62)]
-ord_food<-na.omit(ord_food)
-
-std_ord<-scale(ord_food)
-
 pca<-Agogo_MahirPCA[,c(1,253:315)]
-pca<-na.omit(pca)
-std_pca<-scale(pca)
 
-KMO(pca)  ###kaiser - Meyer - olkin test for sampling adequacy
 
-c1<-cor(pca)
-corrplot(c1, # visualize correlations
-         type = "lower",
-         method = "number",
-         tl.col = "darkblue",
-         number.cex = 0.6,
-         tl.cex = 0.6,
-         col = COL2('RdBu'))
+KMO(pca[,c(-1)])  ###kaiser - Meyer - olkin test for sampling adequacy
 
-fa.parallel(pca, # perform parallel analysis
-            fa = "fa",
-            fm = "ml",
-            show.legend = TRUE,
-            main = "Scree Plot and Parallel Analysis")
-??screeplot()
-??fa.parallel()
-fviz_eig(pca, 
-         addlabels = TRUE, 
-         ylim = c(0, 18),
-         main="Figure 1")
 
-factanal(pca,factors = 4,rotation = "varimax")
+####alternative dietary pattern score####
+
+fr_pca<-Agogo_MahirPCA[,c(1,187:242,245,246,247,249,250,251,252)]
+stfr_pca<-scale(fr_pca[,c(-1)])
+ps_fr<-stfr_pca%*%factor_four_matrix
+ps_fr <- data.frame(ID = fr_pca[, c(1)], ps_fr)
+dm_ag<-Agogo_MahirPCA[,c(1:74)]
+dm_ag<-left_join(dm_ag,pattern_scores,by=c("id"="ID"))
+dm_ag<-dm_ag%>%mutate(edu_mo=na_if(edu_mo,"#NULL!"))
+dm_ag<-dm_ag%>%mutate(mps_pos=na_if(mps_pos,"#NULL!"))
+dm_ag$edu_mo<-as.factor(dm_ag$edu_mo)
+dm_ag$mps_pos<-as.factor(dm_ag$mps_pos)
+dm_rg<-subset(dm_ag,is.na(mps_pos)==F)
+summary(lm(ML3~mps_pos,data = dm_rg))
+pattern_scores<-pattern_scores[(-1:-5),]
+factor_four_fr <- fa(fr_pca [,c(-1)] , nfactors = 4, rotate = "varimax", fm= "ml")
+factor_four_fr
+factor_four_fr<-as.matrix(factor_four_fr$loadings)
+loadings<-unclass(factor_four_fr$loadings)
+loadings<-as.data.frame(loadings)
+newAgogo_final<-Agogo_MahirPCA[,c(1:74)]
+newAgogo_final<-left_join(newAgogo_final,ps_fr,by=c("id"="ID")) #join the pattern scores with the subset data frame for analysis
+newAgogo_final<-left_join(newAgogo_final,mothers_age,by=c("id"="id"))
+
+write_csv2(loadings,"D:/Lenovo data/Masterarbeit publikation/Data/Thesis anaylsis/Agogo_birthcohort/fa.csv")
+
+write.csv2(loadings,"D:/Lenovo data/Masterarbeit publikation/Data/Thesis anaylsis/Agogo_birthcohort/fa.csv", row.names=T)
+
+####factor analysis####
 
 factor_four <- fa(pca [,c(-1)] , nfactors = 4, rotate = "varimax", fm= "ml")
 factor_four
-factor_four_matrix <- as.matrix(factor_four$loadings)
+factor_four_matrix <- as.matrix(factor_four$loadings) # create a matrix of factor loading 
 
-std_pca<-std_pca[,c(-1)]
-pattern_scores<-std_pca%*%factor_four_matrix
 
-pattern_scores <- data.frame(ID = pca[, c(1)], pattern_scores)
+std_pca<-scale(pca[,c(-1)]) #standardize the food intake in kilo calories per day n(0,1)
+
+pattern_scores<-std_pca%*%factor_four_matrix #matrix multiplication to calculate dietary pattern score for each individual
+
+pattern_scores <- data.frame(ID = pca[, c(1)], pattern_scores) #bind the id column to the pattern scores 
 
 #manual calculation to check if the matrix multiplication for pattern score calculation worked or not
 ff1<-std_pca*f1$f1[match(names(std_pca), f1$newColName)][col(std_pca)]
 ff1$pat_sc<-rowSums(ff1,na.rm=T)
 
 
-Agogo_final<-Agogo_MahirPCA[,c(1:74)]
-Agogo_final<-left_join(Agogo_final,pattern_scores,by=c("id"="ID"))
+Agogo_final<-Agogo_MahirPCA[,c(1:74)] #create a subset of variables from original variables to be used in further analysis
+
+Agogo_final<-left_join(Agogo_final,pattern_scores,by=c("id"="ID")) #join the pattern scores with the subset data frame for analysis
+Agogo_final<-left_join(Agogo_final,mothers_age,by=c("id"="id"))
 
 
+Agogo_final$edu_m<-as.factor(Agogo_final$edu_m)
+str(Manufactured_based)
 
-write.table(std_pca,"D:/Lenovo data/Masterarbeit publikation/Data/Thesis anaylsis/std_pca.csv", sep = ";", dec = ",", row.names = F)
-write.table(factor_four,"D:/Lenovo data/Masterarbeit publikation/Data/Thesis anaylsis/fac1.csv",sep = ";", dec = ",",col.names = NA)
+table(Agogo_final$occu_m,useNA = "always")
+
+####Regression analysis####
+
+### 1 Association between in utero malaria and dietary pattern scores###
+
+#crude model
+regression1<-subset(Agogo_final,is.na(pcr_fal_mo)==F) ###create a regression data subset 
+#create a function
+run_lm <- function(ot_v, regression1) {
+  model <- lm(as.formula(paste(ot_v, "~ pcr_fal_mo")), data = regression1)
+  return(model)
+}
+
+#select outcome variables
+ot_vr<-c("ML1","ML4","ML2","ML3")
+
+#empty list to store models
+models<-list()
+#for loop to run all crude regressions
+for (ot_v in ot_vr) {
+  model <- run_lm(ot_v, regression1)
+  models[[ot_v]] <- model
+}
+
+#print the results
+for(ot_v in ot_vr){
+  
+ print(summ(models[[ot_v]], confint = T))
+}
 
 
+### 2. Association between dieatry patterns and cardio metabollic risk factors 
+
+run_lm <- function(ot_v2, pr_v2, Agogo_final) {
+  formula <- as.formula(paste(ot_v2, "~",pr_v2))
+  model<-lm(formula,data = Agogo_final)
+  return(model)
+}
+
+#select outcome variables
+pr_vr<-c("BMI","FPG","sysBP_mean","diaBP_mean")
+ot_vr<-c("ML1","ML4","ML2","ML3")
+
+#empty list to store models
+models<-list()
+#for loop to run all crude regressions
+for(ot_v2 in ot_vr){
+   
+     for(pr_v2 in pr_vr){
+          model_name<-paste(ot_v2,pr_v2, sep="~")
+          model<-run_lm(ot_v2,pr_v2,Agogo_final)
+          models[[model_name]]<-model
+   }
+}
+
+#print the results
+for(model_name in names(models)){
+  
+  cat("model name:",model_name,"\n")
+  print(summ(models[[model_name]]))
+  cat("\n")
+}
+
+### 3. Mediation analysis with roots and tuber based dietary pattern as mediator
+
+#crude model
+mediation<-subset(Agogo_final,is.na(mps_pos)==F)
+
+run_lm <- function(med_ot, mediation) {
+  model <- lm(as.formula(paste(med_ot, "~ mps_pos")), data = mediation)
+  return(model)
+}
+
+#select outcome variables
+mediation_cr<-c("BMI","FPG","sysBP_mean","diaBP_mean")
+
+#empty list to store models
+models<-list()
+#for loop to run all crude regressions
+for (med_ot in mediation_cr) {
+  model <- run_lm(med_ot, mediation)
+  models[[med_ot]] <- model
+}
+
+#print the results
+for(med_ot in mediation_cr){
+  
+  print(summ(models[[med_ot]], confint = T))
+}
+
+
+###adjusted model
+run_lm <- function(med_ot, mediation) {
+  model <- lm(as.formula(paste(med_ot, "~ mps_pos+sex_2015+edu_m")), data = mediation)
+  return(model)
+}
+
+#select outcome variables
+mediation_ad<-c("BMI","FPG","sysBP_mean","diaBP_mean")
+
+#empty list to store models
+models<-list()
+#for loop to run all crude regressions
+for (med_ot in mediation_ad) {
+  model <- run_lm(med_ot, mediation)
+  models[[med_ot]] <- model
+}
+
+#print the results
+for(med_ot in mediation_ad){
+  
+  print(summ(models[[med_ot]], confint = T))
+}
+
+#adjusted +mediator
+
+#create terciles of each dietary pattern
+
+#Manufactured food based diet
+
+Agogo_final<- Agogo_final %>%
+  mutate(Manufactured_based = ntile(ML1, 3)) %>%
+  mutate(Manufactured_based = if_else(Manufactured_based == 1, '1', if_else(Manufactured_based == 2, '2', '3')))
+Manufactured_based<-Agogo_final[,c(4,5,6,9,10,29,40,41,43,59,60,74,79)]
+Manufactured_based$Manufactured_based <- factor(Manufactured_based$Manufactured_based, levels = c(1, 2, 3), 
+                                                labels = c("Tercile 1", "Tercile 2", "Tercile 3"))
+Manufactured_based$Manufactured_based<-factor(Manufactured_based$residence_2015, levels = c(1,2), labels = c("Agogo","Other"))
+
+table(Manufactured_based$residence_2015)
+
+Manufactured_based%>%tbl_summary(by=Manufactured_based,statistic = list(all_continuous() ~ "{mean} ({sd})",
+                                                                        all_categorical() ~ "{n} ({p}%)"), digits = all_continuous()~2)
+
+
+#VeManufactured_based#Vegetables and fruits based diet
+Agogo_final<- Agogo_final %>%
+  mutate(Vegetable_based = ntile(ML4, 3)) %>%
+  mutate(Vegetable_based = if_else(Vegetable_based == 1, '1', if_else(Vegetable_based == 2, '2', '3')))
+Agogo_final$Vegetable_based<-as.factor(Agogo_final$Vegetable_based)
+Vegetable_based<-Agogo_final[,c(1:78,80)]
+
+#Roots and tuber based diet
+Agogo_final<- Agogo_final %>%
+  mutate(Roots_based = ntile(ML2, 3)) %>%
+  mutate(Roots_based = if_else(Roots_based == 1, '1', if_else(Roots_based == 2, '2', '3')))
+Agogo_final$Roots_based<-as.factor(Agogo_final$Roots_based)
+Roots_based<-Agogo_final[,c(1:78,81)]
+
+#Soup and fufu based diet 
+Agogo_final<- Agogo_final %>%
+  mutate(Soup_based = ntile(ML3, 3)) %>%
+  mutate(Soup_based = if_else(Soup_based == 1, '1', if_else(Soup_based == 2, '2', '3')))
+Agogo_final$Soup_based<-as.factor(Agogo_final$Soup_based)
+Soup_based<-Agogo_final[,c(1:78,82)]
 
