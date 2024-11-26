@@ -79,6 +79,7 @@ cor_mat<-cor(pca[,c(-1)])
 cortest.bartlett(cor_mat,n=nrow(pca))
 
 result <- mvn(pca[,c(-1)], mvnTest = "mardia")
+result$Descriptives
 summary(result)
 mult.norm(pca[,c(-1)])$mult.test
 
@@ -89,7 +90,7 @@ Note that the `echo = FALSE` parameter was added to the code chunk to prevent pr
 #####Principal component analysis###
 
 pc <- prcomp(pca[,c(-1)], scale. = TRUE)
-
+summary(pc)
 # Get the eigenvalues (variances of the principal components)
 eigenvalues <- pc$sdev^2
 var <- pc$sdev^2 / sum (pc$sdev^2)
@@ -121,6 +122,7 @@ ggplot(scree_data, aes(x = Principal_Component, y = Variance)) +
 factor_four <- fa(pca [,c(-1)] , nfactors = 4, rotate = "varimax", fm= "ml")
 factor_four
 factor_four_matrix <- as.matrix(factor_four$loadings) # create a matrix of factor loading 
+
 
 std_pca<-scale(pca[,c(-1)]) #standardize the food intake in kilo calories per day n(0,1)
 
@@ -190,7 +192,7 @@ for (ot_v in ot_vr) {
 for(model_name in names(models)){
   
  cat("Model:",model_name,"\n")
-  print(summ(models[[model_name]], confint = T, ci.width = 0.5))
+  print(summ(models[[model_name]], confint = T, ci.width = 0.95))
   cat("\n")
 }
 
@@ -200,7 +202,7 @@ for(model_name in names(models)){
 
 #create a function
 run_lm <- function(ot_v_ad, regression1) {
-  model <- lm(as.formula(paste(ot_v_ad, "~ pcr_fal_mo+sex_2015+edu_m+hh_size+parity+occu_m+mother_age")), data = regression1)
+  model <- lm(as.formula(paste(ot_v_ad, "~ pcr_fal_mo+edu_m+hh_size+parity+occu_m+mother_age")), data = regression1)
   return(model)
 }
 
@@ -222,15 +224,14 @@ for (ot_v_ad in ot_vr_ad) {
 for(model_name in names(models)){
  
  cat("Model:",model_name,"\n")
-  print(summ(models[[model_name]]))
+  print(summ(models[[model_name]],confint = T, ci.width = 0.95))
   cat("\n")
 }
 
 
-export_summs(models[[1]],models[[2]],models[[3]],models[[4]], error_format = "95% CI [{conf.low}, {conf.high}]",to.file = "docx", file.name = "hux.docx" )
-
-
-    ```
+export_summs(models[[1]],models[[2]],models[[3]],models[[4]], error_format = "95% CI [{conf.low}, {conf.high}]",to.file = "docx", file.name = "hux1A.docx" )
+rm(t1)
+```
 
 
 
@@ -363,7 +364,7 @@ export_summs(models[[1]],models[[2]],models[[3]],models[[4]],error_format ="95% 
 ###Adjusted model
 
 run_lm <- function(med_ot, mediation) {
-  model <- lm(as.formula(paste(med_ot, "~ pcr_fal_mo+edu_m+occu_m+mother_age+hh_size+parity")), data = mediation)
+  model <- lm(as.formula(paste(med_ot, "~ pcr_fal_mo+edu_m+occu_m+hh_size+parity+mother_age")), data = mediation)
   return(model)
 }
 
